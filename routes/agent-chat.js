@@ -85,9 +85,12 @@ function requireAgentChatToken (req, res, next) {
 loadMessages()
 
 export default function agentChatRoutes (app) {
-  // Public UI page
+  // Public UI assets
   app.get('/agent-chat/ui', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'chat.html'))
+  })
+  app.get('/agent-chat/chat.js', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'chat.js'))
   })
 
   // Protected API routes
