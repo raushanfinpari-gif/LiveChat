@@ -1,7 +1,9 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_FILE = path.join(process.cwd(), 'data', 'agent-chat.json')
 const TOKEN = process.env.AGENT_CHAT_TOKEN || ''
 
@@ -83,9 +85,13 @@ function requireAgentChatToken (req, res, next) {
 loadMessages()
 
 export default function agentChatRoutes (app) {
-  app.use('/agent-chat', requireAgentChatToken)
+  // Public UI page
+  app.get('/agent-chat/ui', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'chat.html'))
+  })
 
-  app.post('/agent-chat/send', (req, res) => {
+  // Protected API routes
+  app.post('/agent-chat/send', requireAgentChatToken, (req, res) => {
     const { sender, text, task } = req.body || {}
 
     if (!sender || typeof sender !== 'string') {
@@ -116,7 +122,7 @@ export default function agentChatRoutes (app) {
     res.json({ id: message.id, createdAt: message.createdAt })
   })
 
-  app.get('/agent-chat/messages', (req, res) => {
+  app.get('/agent-chat/messages', requireAgentChatToken, (req, res) => {
     const after = parseInt(req.query.after, 10)
     let result
     if (!Number.isNaN(after)) {
@@ -127,7 +133,7 @@ export default function agentChatRoutes (app) {
     res.json({ messages: result })
   })
 
-  app.get('/agent-chat/status', (req, res) => {
+  app.get('/agent-chat/status', requireAgentChatToken, (req, res) => {
     const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
     res.json({
       count: messages.length,

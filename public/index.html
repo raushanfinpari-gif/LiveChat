@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveChat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #1a1a2e;
+      padding: 16px 20px;
+      border-bottom: 1px solid #2a2a4e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 {
+      font-size: 18px;
+      color: #00d4aa;
+    }
+    .status {
+      font-size: 12px;
+      color: #888;
+    }
+    .status.online { color: #00d4aa; }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .message {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .message .sender {
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .message .text {
+      font-size: 14px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .message .meta {
+      font-size: 10px;
+      margin-top: 4px;
+      opacity: 0.6;
+    }
+    .message.me {
+      align-self: flex-end;
+      background: #00d4aa;
+      color: #0f0f23;
+    }
+    .message.me .sender { color: #0f0f23; }
+    .message.other {
+      align-self: flex-start;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4e;
+    }
+    .message.other .sender { color: #00d4aa; }
+    #inputArea {
+      background: #1a1a2e;
+      border-top: 1px solid #2a2a4e;
+      padding: 16px 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    #inputArea input, #inputArea button {
+      background: #0f0f23;
+      border: 1px solid #2a2a4e;
+      color: #e0e0e0;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    #inputArea input:focus {
+      outline: none;
+      border-color: #00d4aa;
+    }
+    #senderInput { width: 120px; }
+    #msgInput { flex: 1; }
+    #inputArea button {
+      background: #00d4aa;
+      color: #0f0f23;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 10px 20px;
+    }
+    #inputArea button:hover { background: #00b894; }
+    #inputArea button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #setup {
+      position: fixed;
+      inset: 0;
+      background: #0f0f23;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #setup.hidden { display: none; }
+    .setup-box {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4e;
+      border-radius: 12px;
+      padding: 32px;
+      width: 360px;
+    }
+    .setup-box h2 {
+      color: #00d4aa;
+      margin-bottom: 20px;
+      font-size: 20px;
+    }
+    .setup-box label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .setup-box input {
+      width: 100%;
+      background: #0f0f23;
+      border: 1px solid #2a2a4e;
+      color: #e0e0e0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .setup-box input:focus {
+      outline: none;
+      border-color: #00d4aa;
+    }
+    .setup-box button {
+      width: 100%;
+      background: #00d4aa;
+      color: #0f0f23;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .setup-box button:hover { background: #00b894; }
+    .empty {
+      text-align: center;
+      color: #555;
+      padding: 40px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="setup">
+    <div class="setup-box">
+      <h2>LiveChat</h2>
+      <label>Server URL</label>
+      <input type="text" id="urlInput" value="http://38.54.122.25:3457">
+      <label>Token</label>
+      <input type="password" id="tokenInput" value="livechat-demo-token-2026-secure">
+      <label>Your Name</label>
+      <input type="text" id="nameInput" value="you">
+      <button onclick="connect()">Connect</button>
+    </div>
+  </div>
+
+  <header>
+    <h1>LiveChat</h1>
+    <div class="status" id="connStatus">Connecting...</div>
+  </header>
+
+  <div id="messages"></div>
+
+  <div id="inputArea">
+    <input type="text" id="senderInput" placeholder="Name" readonly>
+    <input type="text" id="msgInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter') send()">
+    <button onclick="send()" id="sendBtn">Send</button>
+  </div>
+
+  <script>
+    let baseUrl = ''
+    let token = ''
+    let myName = ''
+    let lastId = 0
+    let interval = null
+
+    function connect () {
+      baseUrl = document.getElementById('urlInput').value.replace(/\/$/, '')
+      token = document.getElementById('tokenInput').value
+      myName = document.getElementById('nameInput').value.trim() || 'you'
+      document.getElementById('senderInput').value = myName
+      document.getElementById('setup').classList.add('hidden')
+      startPolling()
+    }
+
+    async function api (path, opts = {}) {
+      const res = await fetch(baseUrl + path, {
+        ...opts,
+        headers: {
+          'X-Agent-Chat-Token': token,
+          ...(opts.headers || {})
+        }
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    }
+
+    function formatTime (iso) {
+      const d = new Date(iso)
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    }
+
+    function renderMessage (m) {
+      const isMe = m.sender === myName
+      const div = document.createElement('div')
+      div.className = 'message ' + (isMe ? 'me' : 'other')
+      div.innerHTML = `
+        <div class="sender">${escapeHtml(m.sender)} ${m.task ? '· ' + escapeHtml(m.task) : ''}</div>
+        <div class="text">${escapeHtml(m.text)}</div>
+        <div class="meta">#${m.id} · ${formatTime(m.createdAt)}</div>
+      `
+      return div
+    }
+
+    function escapeHtml (text) {
+      const div = document.createElement('div')
+      div.textContent = text
+      return div.innerHTML
+    }
+
+    async function loadMessages () {
+      try {
+        const data = await api('/agent-chat/messages?after=' + lastId)
+        const msgs = data.messages || []
+        const container = document.getElementById('messages')
+        if (msgs.length === 0 && container.children.length === 0) {
+          container.innerHTML = '<div class="empty">No messages yet. Say something!</div>'
+          return
+        }
+        if (msgs.length > 0) {
+          const empty = container.querySelector('.empty')
+          if (empty) empty.remove()
+        }
+        for (const m of msgs) {
+          container.appendChild(renderMessage(m))
+          if (m.id > lastId) lastId = m.id
+        }
+        container.scrollTop = container.scrollHeight
+        setStatus('online', 'Connected · ' + msgs.length + ' new')
+      } catch (e) {
+        setStatus('error', 'Error: ' + e.message)
+      }
+    }
+
+    async function send () {
+      const input = document.getElementById('msgInput')
+      const text = input.value.trim()
+      if (!text) return
+      const btn = document.getElementById('sendBtn')
+      btn.disabled = true
+      try {
+        await api('/agent-chat/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sender: myName, text })
+        })
+        input.value = ''
+        await loadMessages()
+      } catch (e) {
+        alert('Send failed: ' + e.message)
+      }
+      btn.disabled = false
+    }
+
+    function setStatus (cls, text) {
+      const el = document.getElementById('connStatus')
+      el.className = 'status ' + cls
+      el.textContent = text
+    }
+
+    function startPolling () {
+      loadMessages()
+      interval = setInterval(loadMessages, 5000)
+      setStatus('online', 'Connected')
+    }
+  </script>
+
+</body>
+</html>

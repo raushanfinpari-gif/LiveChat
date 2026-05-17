@@ -33,7 +33,8 @@ app.use((err, req, res, next) => {
 })
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
-  console.log(`LiveChat relay running on port ${PORT}`)
+const HOST = process.env.HOST || '0.0.0.0'
+app.listen(PORT, HOST, () => {
+  console.log(`LiveChat relay running on ${HOST}:${PORT}`)
   console.log(`Health check: http://localhost:${PORT}/health`)
 })
