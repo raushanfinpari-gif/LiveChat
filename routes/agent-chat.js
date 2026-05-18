@@ -4,44 +4,59 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_FILE = path.join(process.cwd(), 'data', 'agent-chat.json')
-const TOKEN = process.env.AGENT_CHAT_TOKEN || ''
 
-let messages = []
-let nextId = 1
+function getDataFile (roomId) {
+  const name = roomId ? `agent-chat-${roomId}.json` : 'agent-chat.json'
+  return path.join(process.cwd(), 'data', name)
+}
 
-function loadMessages () {
+function getToken (roomId) {
+  const envKey = roomId ? `AGENT_CHAT_TOKEN_${roomId.toUpperCase()}` : 'AGENT_CHAT_TOKEN'
+  return process.env[envKey] || process.env.AGENT_CHAT_TOKEN || ''
+}
+
+const rooms = new Map() // roomId -> { messages, nextId }
+
+function loadRoom (roomId) {
+  const dataFile = getDataFile(roomId)
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf8')
-      messages = JSON.parse(raw)
-      if (!Array.isArray(messages)) messages = []
+    if (fs.existsSync(dataFile)) {
+      const raw = fs.readFileSync(dataFile, 'utf8')
+      const messages = JSON.parse(raw)
+      if (!Array.isArray(messages)) return { messages: [], nextId: 1 }
       const maxId = messages.reduce((max, m) => Math.max(max, m.id || 0), 0)
-      nextId = maxId + 1
-    } else {
-      messages = []
-      nextId = 1
-      persistMessages()
+      return { messages, nextId: maxId + 1 }
     }
   } catch (err) {
-    console.error('[agent-chat] Failed to load messages:', err.message)
-    messages = []
-    nextId = 1
+    console.error(`[agent-chat] Failed to load room ${roomId || 'default'}:`, err.message)
+  }
+  return { messages: [], nextId: 1 }
+}
+
+function persistRoom (roomId, messages) {
+  const dataFile = getDataFile(roomId)
+  try {
+    const tmp = `${dataFile}.tmp.${process.pid}.${Date.now()}`
+    fs.writeFileSync(tmp, JSON.stringify(messages, null, 2), { mode: 0o600 })
+    fs.renameSync(tmp, dataFile)
+  } catch (err) {
+    console.error(`[agent-chat] Failed to persist room ${roomId || 'default'}:`, err.message)
   }
 }
 
-function persistMessages () {
-  try {
-    const tmp = `${DATA_FILE}.tmp.${process.pid}.${Date.now()}`
-    fs.writeFileSync(tmp, JSON.stringify(messages, null, 2), { mode: 0o600 })
-    fs.renameSync(tmp, DATA_FILE)
-  } catch (err) {
-    console.error('[agent-chat] Failed to persist messages:', err.message)
+function getRoom (roomId) {
+  if (!rooms.has(roomId)) {
+    const { messages, nextId } = loadRoom(roomId)
+    rooms.set(roomId, { messages, nextId })
   }
+  return rooms.get(roomId)
 }
 
 function requireAgentChatToken (req, res, next) {
-  if (!TOKEN || TOKEN.length < 24) {
+  const roomId = req.params.roomId || ''
+  const token = getToken(roomId)
+
+  if (!token || token.length < 24) {
     return res.status(500).json({
       error: 'Server Misconfiguration',
       message: 'AGENT_CHAT_TOKEN is not configured or too short (need >= 24 chars).'
@@ -56,7 +71,7 @@ function requireAgentChatToken (req, res, next) {
     })
   }
 
-  if (provided.length !== TOKEN.length) {
+  if (provided.length !== token.length) {
     console.warn(`[agent-chat] Blocked request to ${req.path} from ${req.ip || req.connection?.remoteAddress}`)
     return res.status(401).json({
       error: 'Unauthorized',
@@ -66,7 +81,7 @@ function requireAgentChatToken (req, res, next) {
 
   let ok = false
   try {
-    ok = crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(TOKEN))
+    ok = crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(token))
   } catch {
     ok = false
   }
@@ -82,10 +97,8 @@ function requireAgentChatToken (req, res, next) {
   next()
 }
 
-loadMessages()
-
 export default function agentChatRoutes (app) {
-  // Public UI assets
+  // Public UI pages
   app.get('/agent-chat/ui', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'chat.html'))
   })
@@ -93,8 +106,23 @@ export default function agentChatRoutes (app) {
     res.sendFile(path.join(__dirname, '..', 'public', 'chat.js'))
   })
 
-  // Protected API routes
-  app.post('/agent-chat/send', requireAgentChatToken, (req, res) => {
+  // Room UI
+  app.get('/agent-chat/room/:roomId/ui', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'chat.html'))
+  })
+
+  // Default room API (backward compatible)
+  mountRoomApi(app, '')
+
+  // Named room API
+  mountRoomApi(app, '/room/:roomId')
+}
+
+function mountRoomApi (app, prefix) {
+  const base = prefix ? '/agent-chat' + prefix : '/agent-chat'
+
+  app.post(`${base}/send`, requireAgentChatToken, (req, res) => {
+    const roomId = req.params.roomId || ''
     const { sender, text, task } = req.body || {}
 
     if (!sender || typeof sender !== 'string') {
@@ -110,36 +138,41 @@ export default function agentChatRoutes (app) {
     const sanitizedText = text
       .replace(/(api[_-]?key|token|password|secret)\s*[:=]\s*\S+/gi, '[REDACTED]')
 
+    const room = getRoom(roomId)
     const message = {
-      id: nextId++,
+      id: room.nextId++,
       sender: sender.trim().slice(0, 64),
       text: sanitizedText.trim(),
       task: task && typeof task === 'string' ? task.trim().slice(0, 128) : undefined,
       createdAt: new Date().toISOString()
     }
 
-    messages.push(message)
-    persistMessages()
+    room.messages.push(message)
+    persistRoom(roomId, room.messages)
 
-    console.log(`[agent-chat] #${message.id} from ${message.sender}: ${message.text.slice(0, 80)}`)
+    console.log(`[agent-chat] [${roomId || 'default'}] #${message.id} from ${message.sender}: ${message.text.slice(0, 80)}`)
     res.json({ id: message.id, createdAt: message.createdAt })
   })
 
-  app.get('/agent-chat/messages', requireAgentChatToken, (req, res) => {
+  app.get(`${base}/messages`, requireAgentChatToken, (req, res) => {
+    const roomId = req.params.roomId || ''
     const after = parseInt(req.query.after, 10)
+    const room = getRoom(roomId)
     let result
     if (!Number.isNaN(after)) {
-      result = messages.filter(m => m.id > after)
+      result = room.messages.filter(m => m.id > after)
     } else {
-      result = messages.slice(-100)
+      result = room.messages.slice(-100)
     }
     res.json({ messages: result })
   })
 
-  app.get('/agent-chat/status', requireAgentChatToken, (req, res) => {
-    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+  app.get(`${base}/status`, requireAgentChatToken, (req, res) => {
+    const roomId = req.params.roomId || ''
+    const room = getRoom(roomId)
+    const lastMessage = room.messages.length > 0 ? room.messages[room.messages.length - 1] : null
     res.json({
-      count: messages.length,
+      count: room.messages.length,
       lastId: lastMessage ? lastMessage.id : 0,
       lastMessageAt: lastMessage ? lastMessage.createdAt : null
     })

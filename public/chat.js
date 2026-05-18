@@ -1,4 +1,5 @@
 let baseUrl = '';
+let roomId = '';
 let lastId = 0;
 let interval = null;
 let connected = false;
@@ -7,9 +8,13 @@ function el(id) { return document.getElementById(id); }
 
 window.onload = () => {
   const saved = localStorage.getItem('livechat_token');
+  const savedRoom = localStorage.getItem('livechat_room');
   if (saved) {
     el('tokenInput').value = saved;
     el('rememberCheck').checked = true;
+  }
+  if (savedRoom) {
+    el('roomInput').value = savedRoom;
   }
   el('connectBtn').addEventListener('click', connect);
   el('sendBtn').addEventListener('click', sendMessage);
@@ -48,10 +53,13 @@ async function api(path, opts = {}) {
 function connect() {
   const token = el('tokenInput').value.trim();
   if (!token) { alert('Token is required'); return; }
+  roomId = el('roomInput').value.trim();
   if (el('rememberCheck').checked) {
     localStorage.setItem('livechat_token', token);
+    localStorage.setItem('livechat_room', roomId);
   } else {
     localStorage.removeItem('livechat_token');
+    localStorage.removeItem('livechat_room');
   }
   connected = true;
   lastId = 0;
@@ -59,7 +67,7 @@ function connect() {
   loadMessages(true);
   if (interval) clearInterval(interval);
   interval = setInterval(() => loadMessages(false), 5000);
-  setStatus('Connected', true);
+  setStatus('Connected' + (roomId ? ' · room: ' + roomId : ''), true);
 }
 
 function escapeHtml(text) {
@@ -91,7 +99,7 @@ function renderMessage(m) {
 async function loadMessages(forceScroll) {
   if (!connected) return;
   try {
-    const data = await api('/agent-chat/messages?after=' + lastId);
+    const data = await api((roomId ? '/agent-chat/room/' + roomId + '/messages?after=' : '/agent-chat/messages?after=') + lastId);
     const msgs = data.messages || [];
     const container = el('messages');
     const filter = el('filterTask').value.trim();
@@ -119,7 +127,7 @@ async function loadMessages(forceScroll) {
     if (added && forceScroll !== false) {
       container.scrollTop = container.scrollHeight;
     }
-    setStatus('Connected', true);
+    setStatus('Connected' + (roomId ? ' · room: ' + roomId : ''), true);
   } catch (e) {
     setStatus(e.message || 'Error', false);
   }
@@ -135,7 +143,7 @@ async function sendMessage() {
   const btn = el('sendBtn');
   btn.disabled = true;
   try {
-    await api('/agent-chat/send', {
+    await api(roomId ? '/agent-chat/room/' + roomId + '/send' : '/agent-chat/send', {
       method: 'POST',
       body: JSON.stringify({
         sender: el('senderInput').value.trim() || 'user',
